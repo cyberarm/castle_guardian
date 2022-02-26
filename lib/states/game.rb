@@ -8,11 +8,15 @@ class CastleGuardian
         @captured_stick_figure = nil
 
         @hp = 50
+        @killed_stick_figures = 0
 
         @last_spawned_at = -Float::INFINITY
         @spawn_interval = 1_500
+        @spawner_min_interval = 700 # 425
 
         @debug_info = CyberarmEngine::Text.new("", x: 10, y: 10, z: 74)
+
+        @strength_label = banner "Strength: #{@hp}", width: 1.0, text_align: :right
       end
 
       def draw
@@ -44,10 +48,20 @@ class CastleGuardian
 
         spawner
 
+        # Speed up spawner
         @spawn_interval -= 100 * 0.016
-        @spawn_interval = 425 if @spawn_interval < 425
+        @spawn_interval = @spawner_min_interval if @spawn_interval < @spawner_min_interval
 
         @debug_info.text = "INTERVAL: #{@spawn_interval} ms"
+
+        @strength_label.value = "Strength: #{@hp}"
+
+        @stick_figures.each do |obj|
+          obj.attack!(obj.position.x + obj.width >= window.width * 0.65)
+          damage_castle!(obj)
+        end
+
+        handle_game_over_conditions!
       end
 
       def button_down(id)
@@ -98,6 +112,24 @@ class CastleGuardian
         @captured_stick_figure = nil
       end
 
+      def damage_castle!(obj)
+        @hp -= obj.commit_damage!
+      end
+
+      def handle_game_over_conditions!
+        game_over! if @hp <= 0
+        game_won! if @killed_stick_figures >= 100
+      end
+
+      def game_over!
+        # TODO: Add game over screen
+        # pop_state
+      end
+
+      def game_won!
+        # TODO: Add game won screen
+      end
+
       class StickFigure
         include CyberarmEngine::Common
 
@@ -108,7 +140,8 @@ class CastleGuardian
         DAMPER = 0.9
         FALL_SPEED = 12
         LAND_SPEED = 48
-        TERMINAL_VELOCITY = 100
+        FLING_SPEED = 40
+        TERMINAL_VELOCITY = 1020
 
         attr_accessor :position, :velocity, :captured_position, :captured
 
@@ -116,8 +149,15 @@ class CastleGuardian
           @alive = true
 
           @captured = false
-          @captured_position = nil
+          captured_at = -1
+          @captured_duration = 0
+          @capture_position = CyberarmEngine::Vector.new
+          @capture_contact_position = CyberarmEngine::Vector.new
 
+          @attacking = false
+          @damage_done = 0.0
+
+          @angle = 0
           @position = CyberarmEngine::Vector.new(-WIDTH, window.height - HEIGHT)
           @velocity = CyberarmEngine::Vector.new(48, 0)
         end
@@ -132,6 +172,21 @@ class CastleGuardian
 
         def draw
           Gosu.draw_rect(
+            @position.x - @capture_contact_position.x,
+            @position.y - @capture_contact_position.y,
+            4,
+            4,
+            Gosu::Color::WHITE,
+            Float::INFINITY
+          )
+
+          Gosu.rotate(@angle, @position.x - @capture_contact_position.x, @position.y - @capture_contact_position.y) do
+            render
+          end
+        end
+
+        def render
+          Gosu.draw_rect(
             @position.x, @position.y,
             WIDTH, HEIGHT,
             @alive ? 0x55_000000 : 0x11_800000
@@ -139,9 +194,15 @@ class CastleGuardian
         end
 
         def update
-          if @captured
-            @position.x = window.mouse_x + @captured_position.x
-            @position.y = window.mouse_y + @captured_position.y
+          if captured?
+            @position.x = window.mouse_x + @capture_contact_position.x
+            @position.y = window.mouse_y + @capture_contact_position.y
+
+            @angle += Math.sin(@captured_duration / 1000.0 * Math::PI)
+
+            @captured_duration += window.dt * 1000.0
+          elsif attacking?
+            @damage_done += 1 * window.dt
           else
             physics
           end
@@ -152,6 +213,8 @@ class CastleGuardian
 
           if on_ground?
             die! if @velocity.y >= TERMINAL_VELOCITY
+            @angle = 0 if @velocity.y < TERMINAL_VELOCITY
+            @position.y = window.height - HEIGHT if @velocity.y < TERMINAL_VELOCITY
 
             @velocity.y = 0
             @velocity.x += LAND_SPEED
@@ -171,17 +234,41 @@ class CastleGuardian
 
         def captured!
           @captured = true
-          @captured_position = CyberarmEngine::Vector.new
-          @captured_position.x = @position.x - window.mouse_x
-          @captured_position.y = @position.y - window.mouse_y
+          @captured_at = Gosu.milliseconds
+
+          @capture_contact_position.x = @position.x - window.mouse_x
+          @capture_contact_position.y = @position.y - window.mouse_y
+
+          @capture_position.x = window.mouse_x
+          @capture_position.y = window.mouse_y
         end
 
         def released
           @captured = false
+
+          # Handle being thrown
+          end_position = CyberarmEngine::Vector.new(window.mouse_x, window.mouse_y)
+          direction = (end_position - @capture_position).normalized
+          @velocity += direction * (FLING_SPEED * 1.0 / window.dt)
         end
 
         def on_ground?
           @position.y >= window.height - height
+        end
+
+        def attack!(bool)
+          @attacking = bool
+        end
+
+        def attacking?
+          @attacking
+        end
+
+        def commit_damage!
+          damage = @damage_done.floor
+          @damage_done -= damage
+
+          damage
         end
 
         def die!
