@@ -1,6 +1,6 @@
 class CastleGuardian
   class States
-    class MainMenu < CyberarmEngine::GuiState
+    class GameOver < CyberarmEngine::GuiState
       def setup
         window.show_cursor = true
 
@@ -13,7 +13,8 @@ class CastleGuardian
             banner "Castle Guardian", margin_top: 16, width: 1.0, text_align: :center, text_shadow: true, text_shadow_size: 2, text_shadow_color: 0x44_000000
 
             stack(width: 1.0, height: 1.0, padding: 16) do
-              button "Play", width: 1.0 do
+              button "Play Again", width: 1.0 do
+                pop_state
                 push_state(States::Game)
               end
 
@@ -23,13 +24,10 @@ class CastleGuardian
             end
           end
 
-          stack(width: 0.75, height: 1.0, padding: 48) do
-            background 0xff_222222
-
-            banner "<b>How to play</b>"
-            title "Grab and throw the Stick Figures into the air to defend the castle."
-
-            caption "A game by cyberarm. A recreation of some of those old flash god-mode games.", margin_top: 48
+          stack(width: 0.749, height: 1.0, padding: 48) do
+            background 0xff_401010
+            banner "<b>Game Over</b>"
+            title "Took #{format('%.2f', @options[:timer])} seconds"
           end
         end
       end

@@ -7,14 +7,16 @@ class CastleGuardian
         @stick_figures = []
         @captured_stick_figure = nil
 
-        @hp = 50
+        @initial_hp = 50
+        @hp = @initial_hp
         @killed_stick_figures = 0
 
         @last_spawned_at = -Float::INFINITY
         @spawn_interval = 3_000
-        @spawner_min_interval = 1_750 # 700 # 425
+        @spawner_min_interval = 1_000 # 700 # 425
 
-        @timer = 60.0
+        @initial_timer = 60.0
+        @timer = @initial_timer
 
         @debug_info = CyberarmEngine::Text.new("", x: 10, y: 10, z: 74)
 
@@ -97,9 +99,14 @@ class CastleGuardian
         mouse_over = false
 
         @stick_figures.each do |obj|
-          obj.die! if obj.position.x + obj.width >= window.width - (@castle.width - 36) && obj.on_ground?
-
           next if obj.dead?
+
+          # Flown past castle, teleport
+          if obj.position.x + obj.width >= window.width - (@castle.width - 36) && obj.on_ground?
+            obj.position.x = window.width - (@castle.width)
+            obj.angle = 0
+          end
+
 
           obj.attack!(obj.position.x + obj.width >= window.width - (@castle.width - 32) && obj.on_ground?)
           damage_castle!(obj)
@@ -187,16 +194,17 @@ class CastleGuardian
 
       def handle_game_over_conditions!
         game_over! if @hp <= 0
-        game_won! if @killed_stick_figures >= 100
+        game_won! if @hp.positive? && @timer <= 0
       end
 
       def game_over!
-        # TODO: Add game over screen
-        # pop_state
+        pop_state # Remove game
+        push_state(GameOver, timer: @initial_timer - @timer)
       end
 
       def game_won!
-        # TODO: Add game won screen
+        pop_state # Remove game
+        push_state(GameWon, stick_figures: @stick_figures, damage: @initial_hp - @hp)
       end
     end
   end

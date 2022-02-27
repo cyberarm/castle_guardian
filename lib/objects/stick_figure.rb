@@ -20,7 +20,7 @@ class CastleGuardian
 
     SPLAT = Gosu::Image.new("#{GAME_ROOT_PATH}/media/splat2.png")
 
-    attr_accessor :position, :velocity, :captured_position, :captured
+    attr_accessor :position, :velocity, :captured_position, :captured, :angle
 
     def initialize
       @alive = true
@@ -49,6 +49,11 @@ class CastleGuardian
       @frame = 0
       @frame_interval = 60
       @last_frame_changed = @frame_interval
+
+      @dying_sound = get_sample("#{GAME_ROOT_PATH}/media/dying.ogg")
+      @crumple_sound = get_sample("#{GAME_ROOT_PATH}/media/crumple.ogg")
+      @stunned_sound = get_sample("#{GAME_ROOT_PATH}/media/stunned.ogg")
+      @attack_sound = get_sample("#{GAME_ROOT_PATH}/media/swish_4.wav")
     end
 
     def width
@@ -116,6 +121,8 @@ class CastleGuardian
         @angle = 0 if @velocity.y < TERMINAL_VELOCITY
         @position.y = @ground if @velocity.y < TERMINAL_VELOCITY
 
+        @stunned_sound.play if @velocity.y.positive? && !dead?
+
         @velocity.y = 0
         @velocity.x += LAND_SPEED
       else
@@ -177,11 +184,18 @@ class CastleGuardian
       damage = @damage_done.floor
       @damage_done -= damage
 
+      @attack_sound.play if damage >= 1.0
+
       damage
     end
 
     def die!
-      @died_at = Gosu.milliseconds if @alive
+      if @alive
+        @died_at = Gosu.milliseconds
+        @dying_sound.play
+        @crumple_sound.play
+      end
+
       @alive = false
     end
 
