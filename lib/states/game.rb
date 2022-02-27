@@ -2,7 +2,7 @@ class CastleGuardian
   class States
     class Game < CyberarmEngine::GuiState
       def setup
-        window.show_cursor = true
+        window.show_cursor = false
 
         @stick_figures = []
         @captured_stick_figure = nil
@@ -11,15 +11,39 @@ class CastleGuardian
         @killed_stick_figures = 0
 
         @last_spawned_at = -Float::INFINITY
-        @spawn_interval = 1_500
-        @spawner_min_interval = 700 # 425
+        @spawn_interval = 3_000
+        @spawner_min_interval = 1_750 # 700 # 425
+
+        @timer = 60.0
 
         @debug_info = CyberarmEngine::Text.new("", x: 10, y: 10, z: 74)
 
-        @strength_label = banner "Strength: #{@hp}", width: 1.0, text_align: :right
+        flow(width: 1.0, height: 1.0) do
+          banner "", width: 0.329, text_align: :center
+          @timer_label = banner "01:00", width: 0.33, text_align: :center
+          @strength_label = banner "Strength: #{@hp}", width: 0.33, text_align: :right
+        end
+
+        @cursors = {
+          cursor: get_image("#{GAME_ROOT_PATH}/media/cursor.png"),
+          pointer: get_image("#{GAME_ROOT_PATH}/media/pointer.png"),
+
+          cursor_hit: CyberarmEngine::Vector.new(0.25, 0.6),
+          pointer_hit: CyberarmEngine::Vector.new(0.25, 0.6),
+
+          cursor_color: 0x88_ffffff,
+          pointer_color: 0xaa_ffaa44
+        }
+
+        @cursor = @cursors[:cursor]
+        @cursor_hit = @cursors[:cursor_hit]
+        @cursor_color = @cursors[:cursor_color]
+
+        @castle = get_image("#{GAME_ROOT_PATH}/media/castle.png")
       end
 
       def draw
+        # SKY
         Gosu.draw_quad(
           0,            0,             0xff_221188,
           window.width, 0,             0xff_221188,
@@ -28,17 +52,30 @@ class CastleGuardian
           0
         )
 
+        # GROUND
+        Gosu.draw_quad(
+          0,            window.height * 0.6,  0xff_228811,
+          window.width, window.height * 0.75, 0xff_228811,
+          window.width, window.height,        0xff_227711,
+          0,            window.height,        0xff_227711,
+          0
+        )
+
         super
 
-        Gosu.draw_rect(
-          window.width * 0.65, window.height / 2,
-          window.width * 0.35, window.height / 2,
-          0x22_ffffff
-        )
+        # Gosu.draw_rect(
+        #   window.width * 0.65, window.height / 2,
+        #   window.width * 0.35, window.height / 2,
+        #   0x22_ffffff
+        # )
+
+        @castle.draw(window.width - @castle.width, window.height - @castle.height, 11)
 
         @stick_figures.each(&:draw)
 
         @debug_info.draw
+
+        @cursor.draw_rot(window.mouse_x, window.mouse_y + @cursor.height / 2, Float::INFINITY, 0, @cursor_hit.x, @cursor_hit.y, 1, 1, @cursor_color)
       end
 
       def update
@@ -54,12 +91,33 @@ class CastleGuardian
 
         @debug_info.text = "INTERVAL: #{@spawn_interval} ms"
 
+        @timer_label.value = format_timer
         @strength_label.value = "Strength: #{@hp}"
 
+        mouse_over = false
+
         @stick_figures.each do |obj|
-          obj.attack!(obj.position.x + obj.width >= window.width * 0.65)
+          obj.die! if obj.position.x + obj.width >= window.width - (@castle.width - 36) && obj.on_ground?
+
+          next if obj.dead?
+
+          obj.attack!(obj.position.x + obj.width >= window.width - (@castle.width - 32) && obj.on_ground?)
           damage_castle!(obj)
+
+          mouse_over = mouse_over?(obj) unless mouse_over
         end
+
+        if mouse_over
+          @cursor = @cursors[:pointer]
+          @cursor_hit = @cursors[:pointer_hit]
+          @cursor_color = @cursors[:pointer_color]
+        else
+          @cursor = @cursors[:cursor]
+          @cursor_hit = @cursors[:cursor_hit]
+          @cursor_color = @cursors[:cursor_color]
+        end
+
+        @timer -= window.dt
 
         handle_game_over_conditions!
       end
@@ -84,6 +142,13 @@ class CastleGuardian
         end
       end
 
+      def format_timer
+        minutes = (@timer / 60)
+        seconds = @timer % 60
+
+        format("%02d:%02d", minutes, seconds)
+      end
+
       def spawner
         if Gosu.milliseconds - @last_spawned_at >= @spawn_interval
           @last_spawned_at = Gosu.milliseconds
@@ -97,14 +162,18 @@ class CastleGuardian
 
         @stick_figures.each do |obj|
           next if obj.dead?
-          next unless window.mouse_x.between?(obj.position.x, obj.position.x + obj.width) &&
-                      window.mouse_y.between?(obj.position.y, obj.position.y + obj.height)
+          next unless mouse_over?(obj)
 
           @captured_stick_figure = obj
           obj.captured!
 
           break
         end
+      end
+
+      def mouse_over?(obj)
+        window.mouse_x.between?(obj.position.x, obj.position.x + obj.width) &&
+          window.mouse_y.between?(obj.position.y, obj.position.y + obj.height)
       end
 
       def try_release_stick_figure
@@ -128,157 +197,6 @@ class CastleGuardian
 
       def game_won!
         # TODO: Add game won screen
-      end
-
-      class StickFigure
-        include CyberarmEngine::Common
-
-        WIDTH = 100
-        HEIGHT = 250
-        GRAVITY = 9.8
-        PHYSICS_STEP = 0.016
-        DAMPER = 0.9
-        FALL_SPEED = 12
-        LAND_SPEED = 48
-        FLING_SPEED = 40
-        TERMINAL_VELOCITY = 1020
-
-        attr_accessor :position, :velocity, :captured_position, :captured
-
-        def initialize
-          @alive = true
-
-          @captured = false
-          captured_at = -1
-          @captured_duration = 0
-          @capture_position = CyberarmEngine::Vector.new
-          @capture_contact_position = CyberarmEngine::Vector.new
-
-          @attacking = false
-          @damage_done = 0.0
-
-          @angle = 0
-          @position = CyberarmEngine::Vector.new(-WIDTH, window.height - HEIGHT)
-          @velocity = CyberarmEngine::Vector.new(48, 0)
-        end
-
-        def width
-          WIDTH
-        end
-
-        def height
-          HEIGHT
-        end
-
-        def draw
-          Gosu.draw_rect(
-            @position.x - @capture_contact_position.x,
-            @position.y - @capture_contact_position.y,
-            4,
-            4,
-            Gosu::Color::WHITE,
-            Float::INFINITY
-          )
-
-          Gosu.rotate(@angle, @position.x - @capture_contact_position.x, @position.y - @capture_contact_position.y) do
-            render
-          end
-        end
-
-        def render
-          Gosu.draw_rect(
-            @position.x, @position.y,
-            WIDTH, HEIGHT,
-            @alive ? 0x55_000000 : 0x11_800000
-          )
-        end
-
-        def update
-          if captured?
-            @position.x = window.mouse_x + @capture_contact_position.x
-            @position.y = window.mouse_y + @capture_contact_position.y
-
-            @angle += Math.sin(@captured_duration / 1000.0 * Math::PI)
-
-            @captured_duration += window.dt * 1000.0
-          elsif attacking?
-            @damage_done += 1 * window.dt
-          else
-            physics
-          end
-        end
-
-        def physics
-          return if dead?
-
-          if on_ground?
-            die! if @velocity.y >= TERMINAL_VELOCITY
-            @angle = 0 if @velocity.y < TERMINAL_VELOCITY
-            @position.y = window.height - HEIGHT if @velocity.y < TERMINAL_VELOCITY
-
-            @velocity.y = 0
-            @velocity.x += LAND_SPEED
-          else
-            @velocity.y += GRAVITY * FALL_SPEED
-          end
-
-          @position.x += @velocity.x * PHYSICS_STEP
-          @position.y += @velocity.y * PHYSICS_STEP
-
-          @velocity *= DAMPER
-        end
-
-        def captured?
-          @captured
-        end
-
-        def captured!
-          @captured = true
-          @captured_at = Gosu.milliseconds
-
-          @capture_contact_position.x = @position.x - window.mouse_x
-          @capture_contact_position.y = @position.y - window.mouse_y
-
-          @capture_position.x = window.mouse_x
-          @capture_position.y = window.mouse_y
-        end
-
-        def released
-          @captured = false
-
-          # Handle being thrown
-          end_position = CyberarmEngine::Vector.new(window.mouse_x, window.mouse_y)
-          direction = (end_position - @capture_position).normalized
-          @velocity += direction * (FLING_SPEED * 1.0 / window.dt)
-        end
-
-        def on_ground?
-          @position.y >= window.height - height
-        end
-
-        def attack!(bool)
-          @attacking = bool
-        end
-
-        def attacking?
-          @attacking
-        end
-
-        def commit_damage!
-          damage = @damage_done.floor
-          @damage_done -= damage
-
-          damage
-        end
-
-        def die!
-          @died_at = Gosu.milliseconds if @alive
-          @alive = false
-        end
-
-        def dead?
-          !@alive
-        end
       end
     end
   end
